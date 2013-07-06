@@ -57,18 +57,22 @@ static Bool pad_disabled
     /* internal flag, this does not correspond to device state */ ;
 static int ignore_modifier_combos;
 static int ignore_modifier_keys;
+static int watch_trackpoint;
 static int background;
 static const char *pid_file;
 static Display *display;
 static XDevice *dev;
+static XDevice *tp_dev; /* trackpoint device */
 static Atom touchpad_off_prop;
 static enum TouchpadState previous_state;
 static enum TouchpadState disable_state = TouchpadOff;
 static int verbose;
 
 #define KEYMAP_SIZE 32
+#define TPMAP_SIZE 2
 static unsigned char keyboard_mask[KEYMAP_SIZE];
-
+static unsigned char trackpoint_mask[TPMAP_SIZE];
+static const char * trackpoint_name = "TPPS/2 IBM TrackPoint";
 static void
 usage(void)
 {
@@ -181,6 +185,49 @@ install_signal_handler(void)
     }
 }
 
+
+/**
+ * Return non-zero if the trackpoint state has changed since the last call.
+ */
+static int
+trackpoint_activity(Display * display)
+{
+    static unsigned char old_tp_state[TPMAP_SIZE];
+    unsigned char tp_state[TPMAP_SIZE];
+    int i;
+    int ret = 0;
+    int loop = 0, loop2 = 0;
+    int tp_x = 0, tp_y = 0; 
+    XDeviceState   *state;
+    XInputClass		*cls;
+    XValuatorState	*val_state;
+
+    
+    state = XQueryDeviceState(display, tp_dev);
+
+    fprintf(stdout, "TP TP TP\n");
+
+    if (state) {
+        cls = state->data;
+	for(loop=0; loop<state->num_classes; loop++) {
+	  if (cls->class == ValuatorClass) {
+	    val_state = (XValuatorState *) cls;
+	    tp_state[0] = val_state->valuators[0];
+	    tp_state[1] = val_state->valuators[1];
+	    fprintf(stdout, "TP X: %d\nTP Y: %d\n",
+		    tp_state[0], tp_state[1]);
+	  }
+	}
+	XFreeDeviceState(state);
+    }
+
+    
+    for (i = 0; i < TPMAP_SIZE; i++)
+        old_tp_state[i] = tp_state[i];
+    
+    return ret;
+}
+
 /**
  * Return non-zero if the keyboard state has changed since the last call.
  */
@@ -227,12 +274,20 @@ main_loop(Display * display, double idle_time, int poll_delay)
 {
     double last_activity = 0.0;
     double current_time;
+    int activity = 0;
 
     keyboard_activity(display);
+    if (watch_trackpoint)
+	trackpoint_activity(display);
 
     for (;;) {
         current_time = get_time();
-        if (keyboard_activity(display))
+        activity     = keyboard_activity(display);
+	if (watch_trackpoint) {
+	    activity = activity || trackpoint_activity(display);
+	}
+
+        if (activity)
             last_activity = current_time;
 
         /* If system times goes backwards, touchpad can get locked. Make
@@ -538,6 +593,43 @@ dp_get_device(Display * dpy)
     return dev;
 }
 
+static XDevice *
+trackpoint_get_device(Display * dpy)
+{
+    XDevice *dev = NULL;
+    XDeviceInfo *info = NULL;
+    int ndevices = 0;
+    Atom trackpoint_type = 0;
+    int error = 0;
+
+    trackpoint_type = XInternAtom(dpy, XI_MOUSE, True);
+    info = XListInputDevices(dpy, &ndevices);
+
+    while (ndevices--) {
+	if (info[ndevices].type == trackpoint_type &&
+	    strcmp(info[ndevices].name, trackpoint_name) == 0) {
+	    dev = XOpenDevice(dpy, info[ndevices].id);
+            if (!dev) {
+                fprintf(stderr, "Failed to open device '%s'.\n",
+                        info[ndevices].name);
+                error = 1;
+                goto unwind;
+            }
+            break;
+        }
+    }
+
+ unwind:
+    XFreeDeviceList(info);
+    if (!dev)
+        fprintf(stderr, "Unable to find a trackpoint device.\n");
+    else if (error && dev) {
+        XCloseDevice(dpy, dev);
+        dev = NULL;
+    }
+    return dev;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -547,7 +639,7 @@ main(int argc, char *argv[])
     int use_xrecord = 0;
 
     /* Parse command line parameters */
-    while ((c = getopt(argc, argv, "i:m:dtp:kKR?v")) != EOF) {
+    while ((c = getopt(argc, argv, "i:m:dtp:kKRT?v")) != EOF) {
         switch (c) {
         case 'i':
             idle_time = atof(optarg);
@@ -571,6 +663,9 @@ main(int argc, char *argv[])
             ignore_modifier_combos = 1;
             ignore_modifier_keys = 1;
             break;
+	case 'T':
+	    watch_trackpoint = 1;
+	    break;
         case 'R':
             use_xrecord = 1;
             break;
@@ -595,6 +690,10 @@ main(int argc, char *argv[])
 
     if (!(dev = dp_get_device(display)))
         exit(2);
+
+    if (!(tp_dev = trackpoint_get_device(display))) {
+	watch_trackpoint = 0;
+    }
 
     /* Install a signal handler to restore synaptics parameters on exit */
     install_signal_handler();
