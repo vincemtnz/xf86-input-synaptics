@@ -57,10 +57,12 @@ static Bool pad_disabled
     /* internal flag, this does not correspond to device state */ ;
 static int ignore_modifier_combos;
 static int ignore_modifier_keys;
+static int monitor_trackpoint;
 static int background;
 static const char *pid_file;
 static Display *display;
 static XDevice *dev;
+static XDevice *tp_dev; /* trackpoint device */
 static Atom touchpad_off_prop;
 static enum TouchpadState previous_state;
 static enum TouchpadState disable_state = TouchpadOff;
@@ -68,6 +70,9 @@ static int verbose;
 
 #define KEYMAP_SIZE 32
 static unsigned char keyboard_mask[KEYMAP_SIZE];
+
+#define TP_DEAD_ZONE 3
+static const char * trackpoint_name = "TPPS/2 IBM TrackPoint";
 
 static void
 usage(void)
@@ -86,6 +91,8 @@ usage(void)
     fprintf(stderr,
             "  -k Ignore modifier keys when monitoring keyboard activity.\n");
     fprintf(stderr, "  -K Like -k but also ignore Modifier+Key combos.\n");
+    fprintf(stderr,
+	    "  -T Also monitor trackpoint activity (does not work with -R).\n");
     fprintf(stderr, "  -R Use the XRecord extension.\n");
     fprintf(stderr, "  -v Print diagnostic messages.\n");
     fprintf(stderr, "  -? Show this help message.\n");
@@ -181,6 +188,63 @@ install_signal_handler(void)
     }
 }
 
+
+typedef struct {
+    int x;
+    int y;
+} CursorPosition;
+
+/**
+ * Return non-zero if the trackpoint state has changed since the last call.
+ */
+static int
+trackpoint_activity(Display * display)
+{
+    static CursorPosition *old_tppos = NULL; 
+    CursorPosition *tppos;
+
+    int i;
+    int ret = 0;
+    int diff_x = 0, diff_y = 0;
+
+    XDeviceState   *state;
+    XInputClass	   *data;
+    XValuatorState *val_state;
+    
+    state = XQueryDeviceState(display, tp_dev);
+
+    /* Get current Trackpoint coordinates  */
+    if (state) {
+        data = state->data;
+	for(i=0; i<state->num_classes; ++i) {
+	    if (data->class == ValuatorClass) {
+	        val_state = (XValuatorState *) data;
+		tppos = (CursorPosition *) val_state->valuators;
+	    }
+	    data = (XInputClass *) ((char *) data + data->length);	  
+	}
+	XFreeDeviceState(state);
+    }
+
+    /* Compare coordinates */
+    if (old_tppos) {
+	diff_x = ~(old_tppos->x - tppos->x)+1;
+	diff_y = ~(old_tppos->y - tppos->y)+1;
+	if (diff_x > TP_DEAD_ZONE || diff_y > TP_DEAD_ZONE) {
+	    ret = 1;
+	}
+    }
+    
+    if(!old_tppos) {
+	old_tppos = (CursorPosition *) malloc(sizeof(CursorPosition));
+    }
+
+    /* Copy over old values */
+    memcpy(old_tppos, tppos, sizeof(tppos));
+
+    return ret;
+}
+
 /**
  * Return non-zero if the keyboard state has changed since the last call.
  */
@@ -227,12 +291,19 @@ main_loop(Display * display, double idle_time, int poll_delay)
 {
     double last_activity = 0.0;
     double current_time;
+    int activity = 0;
 
     keyboard_activity(display);
 
     for (;;) {
         current_time = get_time();
-        if (keyboard_activity(display))
+        activity     = keyboard_activity(display);
+	
+	if (monitor_trackpoint) {
+	    activity = activity || trackpoint_activity(display);
+	}
+
+        if (activity)
             last_activity = current_time;
 
         /* If system times goes backwards, touchpad can get locked. Make
@@ -538,6 +609,43 @@ dp_get_device(Display * dpy)
     return dev;
 }
 
+static XDevice *
+trackpoint_get_device(Display * dpy)
+{
+    XDevice *dev = NULL;
+    XDeviceInfo *info = NULL;
+    int ndevices = 0;
+    Atom trackpoint_type = 0;
+    int error = 0;
+
+    trackpoint_type = XInternAtom(dpy, XI_MOUSE, True);
+    info = XListInputDevices(dpy, &ndevices);
+
+    while (ndevices--) {
+	if (info[ndevices].type == trackpoint_type &&
+	    strcmp(info[ndevices].name, trackpoint_name) == 0) {
+	    dev = XOpenDevice(dpy, info[ndevices].id);
+            if (!dev) {
+                fprintf(stderr, "Failed to open device '%s'.\n",
+                        info[ndevices].name);
+                error = 1;
+                goto unwind;
+            }
+            break;
+        }
+    }
+
+ unwind:
+    XFreeDeviceList(info);
+    if (!dev)
+        fprintf(stderr, "Unable to find a trackpoint device.\n");
+    else if (error && dev) {
+        XCloseDevice(dpy, dev);
+        dev = NULL;
+    }
+    return dev;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -547,7 +655,7 @@ main(int argc, char *argv[])
     int use_xrecord = 0;
 
     /* Parse command line parameters */
-    while ((c = getopt(argc, argv, "i:m:dtp:kKR?v")) != EOF) {
+    while ((c = getopt(argc, argv, "i:m:dtp:kKRT?v")) != EOF) {
         switch (c) {
         case 'i':
             idle_time = atof(optarg);
@@ -571,6 +679,9 @@ main(int argc, char *argv[])
             ignore_modifier_combos = 1;
             ignore_modifier_keys = 1;
             break;
+	case 'T':
+	    monitor_trackpoint = 1;
+	    break;
         case 'R':
             use_xrecord = 1;
             break;
@@ -595,6 +706,10 @@ main(int argc, char *argv[])
 
     if (!(dev = dp_get_device(display)))
         exit(2);
+
+    if (!(tp_dev = trackpoint_get_device(display))) {
+	monitor_trackpoint = 0;
+    }
 
     /* Install a signal handler to restore synaptics parameters on exit */
     install_signal_handler();
