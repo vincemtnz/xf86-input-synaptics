@@ -60,6 +60,7 @@ static int ignore_modifier_keys;
 static int monitor_trackpoint;
 static int background;
 static const char *pid_file;
+static const char *trackpoint_name;
 static Display *display;
 static XDevice *dev;
 static XDevice *tp_dev; /* trackpoint device */
@@ -72,7 +73,6 @@ static int verbose;
 static unsigned char keyboard_mask[KEYMAP_SIZE];
 
 #define TP_DEAD_ZONE 3
-static const char * trackpoint_name = "TPPS/2 IBM TrackPoint";
 
 static void
 usage(void)
@@ -92,7 +92,7 @@ usage(void)
             "  -k Ignore modifier keys when monitoring keyboard activity.\n");
     fprintf(stderr, "  -K Like -k but also ignore Modifier+Key combos.\n");
     fprintf(stderr,
-	    "  -T Also monitor trackpoint activity (does not work with -R).\n");
+	    "  -T Monitor activity of trackpoint with the specified name.\n");
     fprintf(stderr, "  -R Use the XRecord extension.\n");
     fprintf(stderr, "  -v Print diagnostic messages.\n");
     fprintf(stderr, "  -? Show this help message.\n");
@@ -655,7 +655,7 @@ main(int argc, char *argv[])
     int use_xrecord = 0;
 
     /* Parse command line parameters */
-    while ((c = getopt(argc, argv, "i:m:dtp:kKRT?v")) != EOF) {
+    while ((c = getopt(argc, argv, "i:m:dtp:kKRT:?v")) != EOF) {
         switch (c) {
         case 'i':
             idle_time = atof(optarg);
@@ -681,6 +681,7 @@ main(int argc, char *argv[])
             break;
 	case 'T':
 	    monitor_trackpoint = 1;
+	    trackpoint_name = optarg;
 	    break;
         case 'R':
             use_xrecord = 1;
