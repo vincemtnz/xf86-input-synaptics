@@ -200,7 +200,7 @@ typedef struct {
 static int
 trackpoint_activity(Display * display)
 {
-    static CursorPosition *old_tppos = NULL; 
+    static CursorPosition old_tppos = {-1, -1};
     CursorPosition *tppos;
 
     int i;
@@ -227,20 +227,18 @@ trackpoint_activity(Display * display)
     }
 
     /* Compare coordinates */
-    if (old_tppos) {
-	diff_x = ~(old_tppos->x - tppos->x)+1;
-	diff_y = ~(old_tppos->y - tppos->y)+1;
+    if (old_tppos.x >= 0) {
+	diff_x = ~(old_tppos.x - tppos->x)+1;
+	diff_y = ~(old_tppos.y - tppos->y)+1;
 	if (diff_x > TP_DEAD_ZONE || diff_y > TP_DEAD_ZONE) {
 	    ret = 1;
 	}
     }
     
-    if(!old_tppos) {
-	old_tppos = (CursorPosition *) malloc(sizeof(CursorPosition));
-    }
-
     /* Copy over old values */
-    memcpy(old_tppos, tppos, sizeof(tppos));
+    old_tppos.x = tppos->x;
+    old_tppos.y = tppos->y;
+
 
     return ret;
 }
