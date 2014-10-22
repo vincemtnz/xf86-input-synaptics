@@ -706,7 +706,7 @@ main(int argc, char *argv[])
     if (!(dev = dp_get_device(display)))
         exit(2);
 
-    if (!(tp_dev = trackpoint_get_device(display))) {
+    if (monitor_trackpoint && !(tp_dev = trackpoint_get_device(display))) {
 	monitor_trackpoint = 0;
     }
 
