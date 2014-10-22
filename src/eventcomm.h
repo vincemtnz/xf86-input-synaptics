@@ -27,6 +27,8 @@
 #ifndef _EVENTCOMM_H_
 #define _EVENTCOMM_H_
 
+#include <xorg-server.h>
+
 #include <linux/input.h>
 #include <linux/version.h>
 #include <xf86Xinput.h>
@@ -38,7 +40,7 @@
 
 struct eventcomm_proto_data;
 
-extern struct eventcomm_proto_data *EventProtoDataAlloc(void);
+extern struct eventcomm_proto_data *EventProtoDataAlloc(int fd);
 
 extern Bool
 EventReadHwState(InputInfoPtr pInfo,
