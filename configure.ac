@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-input-synaptics],
-        [1.7.1],
+        [1.8.99],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-input-synaptics])
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -32,7 +32,6 @@ AC_CONFIG_AUX_DIR(.)
 
 # Initialize Automake
 AM_INIT_AUTOMAKE([foreign dist-bzip2])
-AM_MAINTAINER_MODE
 
 # Initialize libtool
 AC_DISABLE_STATIC
@@ -117,9 +116,14 @@ case "${host}" in
 esac
 if test "x$BUILD_EVENTCOMM" = xyes; then
     AC_DEFINE(BUILD_EVENTCOMM, 1, [Optional backend eventcomm enabled])
-
-    # Obtain compiler/linker options for mtdev
-    PKG_CHECK_MODULES(MTDEV, mtdev)
+    PKG_CHECK_MODULES(LIBEVDEV, [libevdev >= 0.4])
+    SAVE_LIBS="$LIBS"
+    LIBS="$LIBEVDEV_LIBS"
+    AC_CHECK_LIB(evdev, libevdev_set_device_log_function,
+                      [AC_DEFINE(HAVE_LIBEVDEV_DEVICE_LOG_FUNCS, 1,
+                       [libevdev supports per-device log functions])],
+                       [])
+    LIBS="$SAVE_LIBS"
 fi
 if test "x$BUILD_PSMCOMM" = xyes; then
     AC_DEFINE(BUILD_PSMCOMM, 1, [Optional backend psmcomm enabled])
@@ -160,7 +164,6 @@ AC_CONFIG_FILES([Makefile
                 tools/Makefile
                 conf/Makefile
                 include/Makefile
-                test/Makefile
                 xorg-synaptics.pc])
 AC_OUTPUT
 
